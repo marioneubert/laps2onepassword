@@ -5,6 +5,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"math"
 	"os"
@@ -20,7 +21,12 @@ import (
 	"github.com/mattn/go-colorable"
 	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
+
+// Commandline flags
+var flag_loglevel string
+var flag_logfile string
 
 // LapsEntry represents LAPS information read from active directory
 type LapsEntry struct {
@@ -32,14 +38,59 @@ type LapsEntry struct {
 
 // init configures logging before main
 func init() {
-	log.SetOutput(colorable.NewColorableStdout())
-	log.SetLevel(log.DebugLevel)
-	log.SetFormatter(&logrus.TextFormatter{
-		ForceColors:            true,
-		FullTimestamp:          true,
-		DisableLevelTruncation: false,
-	})
-	log.SetReportCaller(false)
+
+	flag.StringVar(&flag_loglevel, "loglevel", "info", "set loglevel [trace,debug,info,warn,error,fatal,panic]")
+	flag.StringVar(&flag_logfile, "logfile", "", "write log to specified file (disables stdout)")
+	flag.Parse()
+	InitLogger()
+}
+
+func InitLogger() {
+	// Level
+	_loglevel := strings.ToLower(flag_loglevel)
+	switch {
+	case _loglevel == "trace":
+		logrus.SetLevel(logrus.TraceLevel)
+	case _loglevel == "debug":
+		logrus.SetLevel(logrus.DebugLevel)
+	case _loglevel == "info":
+		logrus.SetLevel(logrus.InfoLevel)
+	case _loglevel == "warn":
+		logrus.SetLevel(logrus.WarnLevel)
+	case _loglevel == "warning":
+		logrus.SetLevel(logrus.WarnLevel)
+	case _loglevel == "error":
+		logrus.SetLevel(logrus.ErrorLevel)
+	case _loglevel == "fatal":
+		logrus.SetLevel(logrus.FatalLevel)
+	case _loglevel == "panic":
+		logrus.SetLevel(logrus.PanicLevel)
+	default:
+		logrus.SetLevel(logrus.InfoLevel)
+	}
+
+	if flag_logfile == "" {
+		logrus.SetFormatter(&logrus.TextFormatter{
+			ForceColors:     true, // Seems like automatic color detection doesn't work on windows terminals
+			FullTimestamp:   true,
+			TimestampFormat: time.RFC3339,
+		})
+		log.SetOutput(colorable.NewColorableStdout())
+	} else {
+		logrus.SetFormatter(&logrus.TextFormatter{
+			ForceColors:     false, // Seems like automatic color detection doesn't work on windows terminals
+			FullTimestamp:   true,
+			TimestampFormat: time.RFC3339,
+		})
+		logrus.SetOutput(&lumberjack.Logger{
+			Filename:   flag_logfile,
+			MaxSize:    50, // megabytes
+			MaxBackups: 3,
+			MaxAge:     90,    //days
+			Compress:   false, // disabled by default
+		})
+	}
+	logrus.Info("InitLogger: Loglevel set to ", strings.ToLower(log.GetLevel().String()))
 }
 
 // GetAndCheckEnvironment checks all required environment variables
@@ -49,8 +100,6 @@ func GetAndCheckEnvironment() error {
 	if err != nil {
 		return err
 	}
-
-	SetLoglevelFromEnvOr(log.DebugLevel)
 
 	op_connect_host, op_connect_host_found := os.LookupEnv("OP_CONNECT_HOST")
 	op_connect_token, op_connect_token_found := os.LookupEnv("OP_CONNECT_TOKEN")
@@ -93,34 +142,6 @@ func GetAndCheckEnvironment() error {
 		return nil
 	}
 	return errors.New("GetAndCheckEnvironment: Missing required environment variables, see previous errors")
-}
-
-// SetLoglevelFromEnvOr sets the logging level from environment.
-// If environment variable is not set, set it to a default.
-func SetLoglevelFromEnvOr(loglevelDefault log.Level) {
-	op_loglevel, op_loglevel_found := os.LookupEnv("LOGLEVEL")
-	if !op_loglevel_found {
-		log.SetLevel(loglevelDefault)
-		log.Info("SetLoglevelFromEnvOr: LOGLEVEL not set, defaults to ", strings.ToUpper(log.GetLevel().String()))
-	} else if strings.ToUpper(op_loglevel) == "TRACE" {
-		log.SetLevel(log.TraceLevel)
-	} else if strings.ToUpper(op_loglevel) == "DEBUG" {
-		log.SetLevel(log.DebugLevel)
-	} else if strings.ToUpper(op_loglevel) == "INFO" {
-		log.SetLevel(log.InfoLevel)
-	} else if strings.ToUpper(op_loglevel) == "WARN" {
-		log.SetLevel(log.WarnLevel)
-	} else if strings.ToUpper(op_loglevel) == "ERROR" {
-		log.SetLevel(log.ErrorLevel)
-	} else if strings.ToUpper(op_loglevel) == "FATAL" {
-		log.SetLevel(log.FatalLevel)
-	} else if strings.ToUpper(op_loglevel) == "PANIC" {
-		log.SetLevel(log.PanicLevel)
-	} else {
-		log.SetLevel(loglevelDefault)
-		log.Info("SetLoglevelFromEnvOr: LOGLEVEL is not in ['TRACE','DEBUG','INFO','WARN','ERROR','FATAL','PANIC'], defaults to ", strings.ToUpper(log.GetLevel().String()))
-	}
-	log.Info("SetLoglevelFromEnvOr: LOGLEVEL set to ", strings.ToUpper(log.GetLevel().String()))
 }
 
 // getTimeFromFiletime is a helper function and converts
@@ -233,6 +254,7 @@ func GetOnePassEntries() ([]onepassword.Item, error) {
 // CompareLapsToOnepass compares all entries from LAPS with all entries
 // from 1Passwort, if a item from LAPS not found it will be created
 func CompareLapsToOnepass(lapsentries []LapsEntry, onepassentries []onepassword.Item) error {
+	_created_total := 0
 	for i := range lapsentries { // use index because it's faster (no copy)
 		lapsentry_found := false
 		for j := range onepassentries {
@@ -251,8 +273,10 @@ func CompareLapsToOnepass(lapsentries []LapsEntry, onepassentries []onepassword.
 				log.Error("CompareLapsToOnepass: Aborted due to previous error")
 				return err // Errors should not occur, therefore return from here and no more api calls.
 			}
+			_created_total++
 		}
 	}
+	log.Infof("CompareLapsToOnepass: Total created=%d updated=%d", _created_total, 0)
 	return nil
 }
 

@@ -19,4 +19,5 @@ require (
 	go.uber.org/atomic v1.7.0 // indirect
 	golang.org/x/crypto v0.0.0-20200604202706-70a84ac30bf9 // indirect
 	golang.org/x/sys v0.0.0-20210927094055-39ccf1dd6fa6 // indirect
+	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
 )
