@@ -218,57 +218,76 @@ func GetLapsEntries() ([]LapsEntry, error) {
 // GetOnePassEntries connects to an 1Password Connect-Server
 // and retrieves all items from a special vault
 func GetOnePassEntries() ([]onepassword.Item, error) {
-	onepassitems := []onepassword.Item{}
+	opEmptyItems := []onepassword.Item{}
+	opListItems := []onepassword.Item{}
+	opFullItems := []onepassword.Item{}
 
 	client, err := connect.NewClientFromEnvironment()
 	if err != nil {
-		return onepassitems, err
+		return opEmptyItems, err
 	}
 
 	vaults, err := client.GetVaultsByTitle(os.Getenv("OP_VAULT_TITLE"))
 	if err != nil {
-		return onepassitems, err
+		return opEmptyItems, err
 	}
 	if len(vaults) == 0 {
-		return onepassitems, fmt.Errorf("Vault %s not found", os.Getenv("OP_VAULT_TITLE"))
+		return opEmptyItems, fmt.Errorf("Vault %s not found", os.Getenv("OP_VAULT_TITLE"))
 	} else if len(vaults) > 1 {
-		return onepassitems, fmt.Errorf("Vault %s found more than once", os.Getenv("OP_VAULT_TITLE"))
+		return opEmptyItems, fmt.Errorf("Vault %s found more than once", os.Getenv("OP_VAULT_TITLE"))
 	}
 	vault := vaults[0]
 	log.Debug("GetOnePassEntries: Found vault ", vault.Name)
 
-	onepassitems, err = client.GetItems(vault.ID)
+	opListItems, err = client.GetItems(vault.ID)
 	if err != nil {
-		return onepassitems, err
+		return opEmptyItems, err
 	}
 
-	log.Debug("GetOnePassEntries: Got ", len(onepassitems), " entries from onepass")
+	log.Debug("GetOnePassEntries: Got ", len(opListItems), " list entries from onepass")
 
-	for index, onepassitem := range onepassitems {
-		log.Trace("GetOnePassEntries: [", index, "] ", onepassitem.Title)
+	for index, opListItem := range opListItems {
+		opFullItem, err := client.GetItem(opListItem.ID, opListItem.Vault.ID)
+		if err != nil {
+			return opEmptyItems, err
+		}
+		log.Trace("GetOnePassEntries: [", index, "] ", opFullItem.Title)
+		opFullItems = append(opFullItems, *opFullItem)
 	}
 
-	return onepassitems, nil
+	return opFullItems, nil
 }
 
 // CompareLapsToOnepass compares all entries from LAPS with all entries
 // from 1Passwort, if a item from LAPS not found it will be created
 func CompareLapsToOnepass(lapsentries []LapsEntry, onepassentries []onepassword.Item) error {
 	_created_total := 0
-	for i := range lapsentries { // use index because it's faster (no copy)
+	_updated_total := 0
+	var cur_laps_idx = 0
+	var cur_op_idx = 0
+	for cur_laps_idx = range lapsentries { // use index because it's faster (no copy)
 		lapsentry_found := false
-		for j := range onepassentries {
-			if lapsentries[i].dnshostname == onepassentries[j].Title {
+		cur_op_idx = 0
+		for cur_op_idx = range onepassentries {
+			if lapsentries[cur_laps_idx].dnshostname == onepassentries[cur_op_idx].Title {
 				lapsentry_found = true
 				break // break out of the inner loop if a match is found
 			}
 		}
 		if lapsentry_found {
-			log.Trace("CompareLapsToOnepass: Found lapsentry ", lapsentries[i].dnshostname, " in onepassentries")
-			// Todo: UpdateOnPassEntryFromLapsEntry
+			log.Trace("CompareLapsToOnepass: Found lapsentry ", lapsentries[cur_laps_idx].dnshostname, " in onepassentries")
+			if lapsentries[cur_laps_idx].password != onepassentries[cur_op_idx].GetValue("password") {
+				log.Info("CompareLapsToOnepass: Update required ", lapsentries[cur_laps_idx].dnshostname)
+				err := UpdateOnPassEntry(onepassentries[cur_op_idx], lapsentries[cur_laps_idx])
+				if err != nil {
+					log.Error("CompareLapsToOnepass: Aborted due to previous error")
+					return err // Errors should not occur, therefore return from here and no more api calls.
+				}
+				_updated_total++
+			}
 		} else {
-			log.Trace("CompareLapsToOnepass: Not found lapsentry ", lapsentries[i].dnshostname, " in onepassentries")
-			err := CreateOnPassEntryFromLapsEntry(lapsentries[i])
+			log.Trace("CompareLapsToOnepass: Not found lapsentry ", lapsentries[cur_laps_idx].dnshostname, " in onepassentries")
+			err := CreateOnPassEntryFromLapsEntry(lapsentries[cur_laps_idx])
 			if err != nil {
 				log.Error("CompareLapsToOnepass: Aborted due to previous error")
 				return err // Errors should not occur, therefore return from here and no more api calls.
@@ -276,7 +295,7 @@ func CompareLapsToOnepass(lapsentries []LapsEntry, onepassentries []onepassword.
 			_created_total++
 		}
 	}
-	log.Infof("CompareLapsToOnepass: Total created=%d updated=%d", _created_total, 0)
+	log.Infof("CompareLapsToOnepass: Total created=%d updated=%d", _created_total, _updated_total)
 	return nil
 }
 
@@ -340,6 +359,37 @@ func CreateOnPassEntryFromLapsEntry(lapsEntry LapsEntry) error {
 	log.Infof("CreateOnPassEntryFromLapsEntry: %s successfully", opCreatedItem.Title)
 
 	return nil
+}
+
+func UpdateOnPassEntry(onepassentry onepassword.Item, lapsEntry LapsEntry) error {
+	log.Info("UpdateOnPassEntry: ", lapsEntry.dnshostname)
+	client, err := connect.NewClientFromEnvironment()
+	if err != nil {
+		log.Error("UpdateOnPassEntry: ", err)
+		return err
+	}
+
+	if onepassentry.Fields[1].Purpose == "PASSWORD" {
+		onepassentry.Fields[1].Value = lapsEntry.password
+	} else {
+		log.Panicf("UpdateOnPassEntry: Fields[1] purpose is not PASSWORD on %s", onepassentry.Title)
+	}
+
+	if onepassentry.Fields[2].Purpose == "NOTES" {
+		onepassentry.Fields[2].Value = fmt.Sprintf("Updated by laps2onepassword on %s", time.Now().String())
+	} else {
+		log.Panicf("UpdateOnPassEntry: Fields[2] purpose is not NOTES on %s", onepassentry.Title)
+	}
+
+	client.UpdateItem(&onepassentry, onepassentry.Vault.ID)
+	if err != nil {
+		log.Error("UpdateOnPassEntry: ", err)
+		return err
+	}
+
+	log.Infof("UpdateOnPassEntry: %s successfully", onepassentry.Title)
+	return nil
+
 }
 
 // main start of this programm
