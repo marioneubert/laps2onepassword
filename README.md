@@ -4,6 +4,15 @@
 
 This program exports Microsoft LAPS(Local Administrator Password Solution) managed computer/login information to an 1Password vault as replacement to the LAPS-UI programm.
 
+## Develop
+
+```sh
+git clone https://github.com/marioneubert/laps2onepassword.git
+cd laps2onepassword
+go get ./...
+
+```
+
 ## Links
 
 ### LAPS

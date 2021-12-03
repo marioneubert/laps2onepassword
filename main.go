@@ -19,7 +19,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/mattn/go-colorable"
-	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -50,39 +49,39 @@ func InitLogger() {
 	_loglevel := strings.ToLower(flag_loglevel)
 	switch {
 	case _loglevel == "trace":
-		logrus.SetLevel(logrus.TraceLevel)
+		log.SetLevel(log.TraceLevel)
 	case _loglevel == "debug":
-		logrus.SetLevel(logrus.DebugLevel)
+		log.SetLevel(log.DebugLevel)
 	case _loglevel == "info":
-		logrus.SetLevel(logrus.InfoLevel)
+		log.SetLevel(log.InfoLevel)
 	case _loglevel == "warn":
-		logrus.SetLevel(logrus.WarnLevel)
+		log.SetLevel(log.WarnLevel)
 	case _loglevel == "warning":
-		logrus.SetLevel(logrus.WarnLevel)
+		log.SetLevel(log.WarnLevel)
 	case _loglevel == "error":
-		logrus.SetLevel(logrus.ErrorLevel)
+		log.SetLevel(log.ErrorLevel)
 	case _loglevel == "fatal":
-		logrus.SetLevel(logrus.FatalLevel)
+		log.SetLevel(log.FatalLevel)
 	case _loglevel == "panic":
-		logrus.SetLevel(logrus.PanicLevel)
+		log.SetLevel(log.PanicLevel)
 	default:
-		logrus.SetLevel(logrus.InfoLevel)
+		log.SetLevel(log.InfoLevel)
 	}
 
 	if flag_logfile == "" {
-		logrus.SetFormatter(&logrus.TextFormatter{
+		log.SetFormatter(&log.TextFormatter{
 			ForceColors:     true, // Seems like automatic color detection doesn't work on windows terminals
 			FullTimestamp:   true,
 			TimestampFormat: time.RFC3339,
 		})
 		log.SetOutput(colorable.NewColorableStdout())
 	} else {
-		logrus.SetFormatter(&logrus.TextFormatter{
+		log.SetFormatter(&log.TextFormatter{
 			ForceColors:     false, // Seems like automatic color detection doesn't work on windows terminals
 			FullTimestamp:   true,
 			TimestampFormat: time.RFC3339,
 		})
-		logrus.SetOutput(&lumberjack.Logger{
+		log.SetOutput(&lumberjack.Logger{
 			Filename:   flag_logfile,
 			MaxSize:    50, // megabytes
 			MaxBackups: 3,
@@ -90,7 +89,7 @@ func InitLogger() {
 			Compress:   false, // disabled by default
 		})
 	}
-	logrus.Info("InitLogger: Loglevel set to ", strings.ToLower(log.GetLevel().String()))
+	log.Debug("InitLogger: Loglevel set to ", strings.ToLower(log.GetLevel().String()))
 }
 
 // GetAndCheckEnvironment checks all required environment variables
@@ -232,9 +231,9 @@ func GetOnePassEntries() ([]onepassword.Item, error) {
 		return opEmptyItems, err
 	}
 	if len(vaults) == 0 {
-		return opEmptyItems, fmt.Errorf("Vault %s not found", os.Getenv("OP_VAULT_TITLE"))
+		return opEmptyItems, fmt.Errorf("vault %s not found", os.Getenv("OP_VAULT_TITLE"))
 	} else if len(vaults) > 1 {
-		return opEmptyItems, fmt.Errorf("Vault %s found more than once", os.Getenv("OP_VAULT_TITLE"))
+		return opEmptyItems, fmt.Errorf("fault %s found more than once", os.Getenv("OP_VAULT_TITLE"))
 	}
 	vault := vaults[0]
 	log.Debug("GetOnePassEntries: Found vault ", vault.Name)
@@ -395,7 +394,7 @@ func UpdateOnPassEntry(onepassentry onepassword.Item, lapsEntry LapsEntry) error
 // main start of this programm
 func main() {
 
-	log.Info("Main: Start programm")
+	log.Debug("Main: Start programm")
 
 	// Get and check environment
 	// Set logging options
@@ -429,6 +428,6 @@ func main() {
 		log.Error("Main: Aborted due to previous error")
 		os.Exit(1)
 	}
-	log.Info("Main: Successfully exit")
+	log.Debug("Main: Successfully exit")
 	os.Exit(0)
 }
